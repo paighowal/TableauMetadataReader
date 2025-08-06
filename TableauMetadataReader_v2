@@ -1,0 +1,521 @@
+from tkinter import *
+import tkinter as tk
+from tkinter import filedialog, messagebox
+from xml.sax.saxutils import unescape
+import xml.etree.ElementTree as ET
+import os
+
+
+class App:
+    def __init__(self, master):
+        self.master = master
+        self.in_path = ""
+        self.out_path = ""
+        self.html_src = ""
+        self.caldic = {}
+        
+        self.setup_ui()
+
+    def setup_ui(self):
+        frame = Frame(self.master)
+        frame.pack(padx=20, pady=20)
+
+        # Title
+        title_label = Label(frame, text="Tableau Metadata Reader Tool", font=("Arial", 16, "bold"))
+        title_label.grid(row=0, column=0, columnspan=3, padx=10, pady=10, sticky=W)
+
+        # Buttons
+        self.open_btn = Button(frame, text="OPEN TWB FILE", command=self.open_file, width=15)
+        self.open_btn.grid(row=1, column=0, padx=5, pady=5, sticky=W)
+
+        self.html_btn = Button(frame, text="GENERATE HTML", command=self.convert_to_html, width=15)
+        self.html_btn.grid(row=1, column=1, padx=5, pady=5)
+
+        self.quit_btn = Button(frame, text="QUIT", command=self.master.quit, width=15)
+        self.quit_btn.grid(row=1, column=2, padx=5, pady=5, sticky=E)
+
+        # Status label
+        self.lbl_file = Label(frame, text="Please select a TWB file to begin", wraplength=600)
+        self.lbl_file.grid(row=2, column=0, columnspan=3, padx=10, pady=10, sticky=W)
+
+    def open_file(self):
+        try:
+            filename = filedialog.askopenfilename(
+                initialdir="/",
+                title="Select Tableau Workbook file",
+                filetypes=(("Tableau Workbook", "*.twb"), ("All files", "*.*"))
+            )
+            
+            if filename:
+                if not filename.lower().endswith('.twb'):
+                    messagebox.showwarning("Invalid File", "Please select a .twb file")
+                    return
+                    
+                if not os.path.exists(filename):
+                    messagebox.showerror("File Error", "Selected file does not exist")
+                    return
+                
+                self.in_path = filename
+                self.lbl_file.configure(text=f"File loaded: {os.path.basename(self.in_path)}")
+                print(f"Opened file: {self.in_path}")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Error opening file: {str(e)}")
+
+    def save_file(self):
+        try:
+            filename = filedialog.asksaveasfilename(
+                initialdir="/",
+                title="Save HTML documentation",
+                defaultextension=".html",
+                filetypes=(("HTML files", "*.html"), ("All files", "*.*"))
+            )
+            return filename
+        except Exception as e:
+            messagebox.showerror("Error", f"Error selecting save location: {str(e)}")
+            return None
+
+    def convert_to_html(self):
+        if not self.in_path:
+            messagebox.showwarning("No File", "Please open a TWB file first")
+            return
+
+        try:
+            save_path = self.save_file()
+            if not save_path:
+                return
+
+            if not save_path.endswith(".html"):
+                save_path += ".html"
+
+            self.out_path = save_path
+            self.lbl_file.configure(text=f"Processing file... Please wait")
+            self.master.update()
+
+            # Process the TWB file
+            self.read_twb()
+
+            # Write HTML output
+            with open(self.out_path, 'w', encoding="utf-8") as f:
+                html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Tableau Workbook Documentation</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; margin: 20px; }}
+        h1, h2, h3 {{ color: #333; }}
+        table {{ border-collapse: collapse; width: 100%; margin-bottom: 20px; }}
+        th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+        th {{ background-color: #98B5E3; font-weight: bold; }}
+        .center {{ text-align: center; }}
+        .formula {{ font-family: monospace; background-color: #f5f5f5; padding: 2px; word-break: break-all; }}
+        .section {{ margin: 20px 0; }}
+    </style>
+</head>
+<body>
+    <h1>Tableau Workbook Documentation</h1>
+    {self.html_src}
+</body>
+</html>"""
+                f.write(html_content)
+
+            self.lbl_file.configure(text=f"Documentation saved: {os.path.basename(self.out_path)}")
+            messagebox.showinfo("Success", f"HTML documentation generated successfully!\nSaved to: {self.out_path}")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Error generating HTML: {str(e)}")
+            print(f"Error details: {e}")
+
+    def read_twb(self):
+        try:
+            self.html_src = ""
+            self.caldic = {}
+            
+            # Parse XML
+            tree = ET.parse(self.in_path)
+            root = tree.getroot()
+            
+            # Parse different sections
+            self.parse_version_info(root)
+            self.parse_datasources(root)
+            self.parse_dashboards_worksheets(root)
+
+        except ET.ParseError as e:
+            raise Exception(f"Invalid XML file: {str(e)}")
+        except Exception as e:
+            raise Exception(f"Error reading TWB file: {str(e)}")
+
+    def parse_version_info(self, root):
+        """Parse version information from TWB file"""
+        self.html_src += '<div class="section"><h2>VERSION INFORMATION</h2>\n'
+        
+        version_table = """<table>
+<tr><th>Property</th><th>Value</th></tr>"""
+        
+        # Get workbook attributes
+        version_table += f"<tr><td>File Path</td><td>{self.in_path}</td></tr>"
+        
+        # Try to get version info from workbook attributes
+        if 'source-build' in root.attrib:
+            version_table += f"<tr><td>Source Build</td><td>{root.attrib['source-build']}</td></tr>"
+        
+        if 'source-platform' in root.attrib:
+            version_table += f"<tr><td>Source Platform</td><td>{root.attrib['source-platform']}</td></tr>"
+        
+        if 'version' in root.attrib:
+            version_table += f"<tr><td>Version</td><td>{root.attrib['version']}</td></tr>"
+        
+        version_table += "</table></div>\n"
+        self.html_src += version_table
+
+    def parse_datasources(self, root):
+        """Parse all datasources"""
+        self.html_src += '<div class="section"><h2>DATASOURCES</h2>\n'
+        
+        datasources = root.findall('.//datasource')
+        
+        if not datasources:
+            self.html_src += "<p>No datasources found.</p></div>\n"
+            return
+
+        ds_count = 0
+        for ds in datasources:
+            caption = ds.get('caption', 'Unknown')
+            name = ds.get('name', 'Unknown')
+            
+            # Skip empty or system datasources
+            if not caption or caption in ['', 'Unknown'] or name in ['Parameters', 'federated']:
+                continue
+                
+            ds_count += 1
+            self.html_src += f"<h3>DATASOURCE {ds_count}: {caption}</h3>\n"
+            
+            # Datasource details
+            self.parse_datasource_details(ds)
+            
+            # Fields and calculations
+            self.parse_datasource_fields(ds)
+            
+            # Extract information
+            self.parse_extract_info(ds)
+        
+        # Parse Parameters separately
+        self.parse_parameters(root)
+        
+        self.html_src += "</div>\n"
+
+    def parse_datasource_details(self, ds):
+        """Parse individual datasource details"""
+        caption = ds.get('caption', 'Unknown')
+        name = ds.get('name', 'Unknown')
+        version = ds.get('version', 'Unknown')
+        
+        ds_table = f"""<table>
+<tr><th>Property</th><th>Value</th></tr>
+<tr><td>Caption</td><td>{caption}</td></tr>
+<tr><td>Name</td><td>{name}</td></tr>
+<tr><td>Version</td><td>{version}</td></tr>"""
+        
+        # Connection details
+        connection = ds.find('.//connection')
+        if connection is not None:
+            if 'class' in connection.attrib:
+                ds_table += f"<tr><td>Connection Type</td><td>{connection.get('class')}</td></tr>"
+            if 'server' in connection.attrib:
+                ds_table += f"<tr><td>Server</td><td>{connection.get('server')}</td></tr>"
+            if 'dbname' in connection.attrib:
+                ds_table += f"<tr><td>Database</td><td>{connection.get('dbname')}</td></tr>"
+            if 'filename' in connection.attrib:
+                ds_table += f"<tr><td>File Name</td><td>{connection.get('filename')}</td></tr>"
+        
+        ds_table += "</table>\n"
+        self.html_src += ds_table
+
+    def parse_datasource_fields(self, ds):
+        """Parse fields and calculations for a datasource"""
+        
+        # Parse regular fields from metadata
+        self.html_src += "<h4>Fields</h4>\n"
+        
+        metadata_records = ds.find('.//metadata-records')
+        if metadata_records is not None:
+            fields = metadata_records.findall('.//metadata-record[@class="column"]')
+            
+            if fields:
+                field_table = """<table>
+<tr><th>ID</th><th>Field Name</th><th>Table</th><th>Data Type</th></tr>"""
+                
+                for i, field in enumerate(fields, 1):
+                    remote_name_elem = field.find('.//remote-name')
+                    parent_name_elem = field.find('.//parent-name')
+                    local_type_elem = field.find('.//local-type')
+                    
+                    remote_name = remote_name_elem.text if remote_name_elem is not None else "Unknown"
+                    parent_name = parent_name_elem.text if parent_name_elem is not None else "-"
+                    local_type = local_type_elem.text if local_type_elem is not None else "Unknown"
+                    
+                    field_table += f"""<tr>
+<td class="center">{i}</td>
+<td>{remote_name}</td>
+<td>{parent_name}</td>
+<td>{local_type}</td>
+</tr>"""
+                
+                field_table += "</table>\n"
+                self.html_src += field_table
+            else:
+                self.html_src += "<p>No fields found in metadata.</p>\n"
+        else:
+            self.html_src += "<p>No metadata records found.</p>\n"
+        
+        # Parse calculated fields
+        self.parse_calculated_fields(ds)
+
+    def parse_calculated_fields(self, ds):
+        """Parse calculated fields"""
+        self.html_src += "<h4>Calculated Fields</h4>\n"
+        
+        # Build a comprehensive mapping of internal names to field names
+        name_mapping = {}
+        
+        # Look at all columns in the datasource (including from different sections)
+        all_columns = ds.findall('.//column')
+        
+        # Build mapping from all possible sources
+        for col in all_columns:
+            name = col.get('name', '').strip()
+            caption = col.get('caption', '').strip()
+            
+            if name and caption and name != caption:
+                name_mapping[name] = caption
+                # Also add without brackets in case they're referenced differently
+                if name.startswith('[') and name.endswith(']'):
+                    clean_name = name[1:-1]
+                    name_mapping[clean_name] = caption
+        
+        # Also check metadata records for additional mappings
+        metadata_records = ds.find('.//metadata-records')
+        if metadata_records is not None:
+            for record in metadata_records.findall('.//metadata-record'):
+                # Look for local-name to remote-name mappings
+                local_name_elem = record.find('.//local-name')
+                remote_name_elem = record.find('.//remote-name')
+                if local_name_elem is not None and remote_name_elem is not None:
+                    local_name = local_name_elem.text
+                    remote_name = remote_name_elem.text
+                    if local_name and remote_name and local_name != remote_name:
+                        name_mapping[local_name] = remote_name
+        
+        print(f"Debug: Found {len(name_mapping)} name mappings")
+        for k, v in list(name_mapping.items())[:5]:  # Print first 5 for debugging
+            print(f"  {k} -> {v}")
+        
+        # Find calculated fields and replace references in formulas
+        calculated_fields = []
+        
+        for col in all_columns:
+            calculation = col.find('.//calculation')
+            if calculation is not None:
+                caption = col.get('caption', 'Unknown')
+                name = col.get('name', 'Unknown')
+                datatype = col.get('datatype', 'Unknown')
+                role = col.get('role', 'Unknown')
+                formula = calculation.get('formula', '')
+                
+                print(f"Debug: Processing calculated field '{caption}' with original formula: {formula[:100]}...")
+                
+                # Clean up the formula
+                if formula:
+                    formula = unescape(formula, {
+                        "&apos;": "'", 
+                        "&quot;": '"', 
+                        "&#13;": "\n", 
+                        "&#10;": "\n",
+                        "&lt;": "<",
+                        "&gt;": ">",
+                        "&amp;": "&"
+                    })
+                    
+                    # Replace internal field references with actual field names
+                    original_formula = formula
+                    for internal_name, field_caption in name_mapping.items():
+                        # Try different reference patterns
+                        patterns_to_replace = [
+                            f'[{internal_name}]',
+                            f'{internal_name}',
+                        ]
+                        
+                        for pattern in patterns_to_replace:
+                            if pattern in formula:
+                                formula = formula.replace(pattern, f'[{field_caption}]')
+                                print(f"Debug: Replaced '{pattern}' with '[{field_caption}]'")
+                    
+                    if formula != original_formula:
+                        print(f"Debug: Formula changed for '{caption}'")
+                    else:
+                        print(f"Debug: No changes made to formula for '{caption}'")
+                
+                calculated_fields.append((caption, name, datatype, role, formula))
+        
+        if calculated_fields:
+            calc_table = """<table>
+<tr><th>ID</th><th>Field Name</th><th>Internal Name</th><th>Data Type</th><th>Role</th><th>Formula</th></tr>"""
+            
+            for i, (caption, name, datatype, role, formula) in enumerate(calculated_fields, 1):
+                calc_table += f"""<tr>
+<td class="center">{i}</td>
+<td>{caption}</td>
+<td>{name}</td>
+<td>{datatype}</td>
+<td>{role}</td>
+<td class="formula">{formula}</td>
+</tr>"""
+            
+            calc_table += "</table>\n"
+            self.html_src += calc_table
+        else:
+            self.html_src += "<p>No calculated fields found.</p>\n"
+
+    def parse_extract_info(self, ds):
+        """Parse extract information"""
+        extract = ds.find('.//extract')
+        if extract is not None:
+            self.html_src += "<h4>Extract Information</h4>\n"
+            
+            extract_table = """<table>
+<tr><th>Property</th><th>Value</th></tr>"""
+            
+            if 'count' in extract.attrib:
+                extract_table += f"<tr><td>Record Count</td><td>{extract.get('count')}</td></tr>"
+            
+            # Look for extract update info
+            extract_uistate = extract.find('.//extract-uistate')
+            if extract_uistate is not None and 'update-time' in extract_uistate.attrib:
+                update_time = extract_uistate.get('update-time')
+                extract_table += f"<tr><td>Last Update</td><td>{update_time}</td></tr>"
+            
+            extract_table += "</table>\n"
+            self.html_src += extract_table
+
+    def parse_parameters(self, root):
+        """Parse parameters"""
+        self.html_src += '<div class="section"><h2>PARAMETERS</h2>\n'
+        
+        # Find Parameters datasource
+        param_datasource = None
+        for ds in root.findall('.//datasource'):
+            if ds.get('name') == 'Parameters':
+                param_datasource = ds
+                break
+        
+        if param_datasource is None:
+            self.html_src += "<p>No parameters found.</p></div>\n"
+            return
+        
+        # Get parameter columns
+        param_columns = param_datasource.findall('.//column')
+        
+        if not param_columns:
+            self.html_src += "<p>No parameter columns found.</p></div>\n"
+            return
+        
+        param_table = """<table>
+<tr><th>ID</th><th>Parameter Name</th><th>Data Type</th><th>Values/Range</th></tr>"""
+        
+        for i, col in enumerate(param_columns, 1):
+            caption = col.get('caption', 'Unknown')
+            datatype = col.get('datatype', 'Unknown')
+            
+            # Get parameter values
+            values_info = []
+            
+            # Check for members (discrete values)
+            members = col.findall('.//member')
+            if members:
+                member_values = [m.get('value', '') for m in members[:5]]  # First 5 values
+                if len(members) > 5:
+                    values_info.append(f"{', '.join(member_values)} ... ({len(members)} total)")
+                else:
+                    values_info.append(', '.join(member_values))
+            
+            # Check for range (continuous values)
+            range_elem = col.find('.//range')
+            if range_elem is not None:
+                min_val = range_elem.get('min', '')
+                max_val = range_elem.get('max', '')
+                if min_val and max_val:
+                    values_info.append(f"Range: {min_val} to {max_val}")
+            
+            values_str = '; '.join(values_info) if values_info else 'No values defined'
+            
+            param_table += f"""<tr>
+<td class="center">{i}</td>
+<td>{caption}</td>
+<td>{datatype}</td>
+<td>{values_str}</td>
+</tr>"""
+        
+        param_table += "</table></div>\n"
+        self.html_src += param_table
+
+    def parse_dashboards_worksheets(self, root):
+        """Parse dashboard and worksheet information"""
+        
+        # Dashboards
+        self.html_src += '<div class="section"><h2>DASHBOARDS</h2>\n'
+        
+        dashboards = root.findall('.//dashboard')
+        
+        if dashboards:
+            dash_table = """<table>
+<tr><th>ID</th><th>Dashboard Name</th></tr>"""
+            for i, dashboard in enumerate(dashboards, 1):
+                name = dashboard.get('name', 'Unknown')
+                dash_table += f'<tr><td class="center">{i}</td><td>{name}</td></tr>'
+            dash_table += "</table>"
+            self.html_src += dash_table
+        else:
+            self.html_src += "<p>No dashboards found.</p>"
+        
+        self.html_src += "</div>\n"
+        
+        # Worksheets
+        self.html_src += '<div class="section"><h2>WORKSHEETS</h2>\n'
+        
+        worksheets = root.findall('.//worksheet')
+        
+        if worksheets:
+            ws_table = """<table>
+<tr><th>ID</th><th>Worksheet Name</th></tr>"""
+            for i, worksheet in enumerate(worksheets, 1):
+                name = worksheet.get('name', 'Unknown')
+                ws_table += f'<tr><td class="center">{i}</td><td>{name}</td></tr>'
+            ws_table += "</table>"
+            self.html_src += ws_table
+        else:
+            self.html_src += "<p>No worksheets found.</p>"
+        
+        self.html_src += "</div>\n"
+
+
+def main():
+    root = Tk()
+    root.title("Tableau Metadata Reader")
+    root.geometry("700x200")
+    root.resizable(False, False)
+    
+    try:
+        app = App(root)
+        root.mainloop()
+    except Exception as e:
+        messagebox.showerror("Application Error", f"An error occurred: {str(e)}")
+    finally:
+        try:
+            root.destroy()
+        except:
+            pass
+
+
+if __name__ == "__main__":
+    main()
